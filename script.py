@@ -38,15 +38,15 @@ class NHentaiTorrentDownloader:
                         if parts[4] and parts[4] != '0':
                             cookie['expires'] = int(parts[4])
                         cookies.append(cookie)
-            print(f"✓ Loaded {len(cookies)} cookies from {self.cookies_file}")
+            print(f"Loaded {len(cookies)} cookies from {self.cookies_file}")
             return cookies
         except Exception as e:
-            print(f"✗ Error parsing cookies: {e}")
+            print(f"Error parsing cookies: {e}")
             return []
 
     async def wait_for_cloudflare(self, page):
         """Wait for Cloudflare challenge to complete"""
-        print("⏳ Waiting for Cloudflare challenge...")
+        print("Waiting for Cloudflare challenge...")
 
         max_wait = 30  # seconds
         start_time = asyncio.get_event_loop().time()
@@ -62,14 +62,14 @@ class NHentaiTorrentDownloader:
 
                 # Check if we're on the actual page
                 if "favorites" in page.url.lower() or "gallery" in content.lower():
-                    print("✓ Cloudflare challenge passed!")
+                    print("Cloudflare challenge passed!")
                     return True
 
                 await asyncio.sleep(1)
             except:
                 await asyncio.sleep(1)
 
-        print("⚠️  Cloudflare challenge timeout")
+        print("Cloudflare challenge timeout")
         return False
 
     async def get_favourites_pages(self, page) -> int:
@@ -139,7 +139,7 @@ class NHentaiTorrentDownloader:
 
             # Skip if already exists
             if download_path.exists():
-                print(f"  ⊘ Skipped: {gallery_id}.torrent (already exists)")
+                print(f"  Skipped: {gallery_id}.torrent (already exists)")
                 return True
 
             # Go to gallery page first
@@ -161,15 +161,15 @@ class NHentaiTorrentDownloader:
                 download = await download_info.value
                 await download.save_as(download_path)
 
-            print(f"  ✓ Downloaded: {gallery_id}.torrent")
+            print(f"  Downloaded: {gallery_id}.torrent")
             return True
 
         except asyncio.TimeoutError:
-            print(f"  ✗ Failed {gallery_id}: Download timeout")
+            print(f"  Failed {gallery_id}: Download timeout")
             return False
         except Exception as e:
             error_msg = str(e).split('\n')[0][:80]
-            print(f"  ✗ Failed {gallery_id}: {error_msg}")
+            print(f"  Failed {gallery_id}: {error_msg}")
             return False
 
     async def run(self, max_galleries: int = None, start_page: int = 1, only_single_page: bool = False):
@@ -180,19 +180,21 @@ class NHentaiTorrentDownloader:
             return
 
         async with async_playwright() as p:
-            # Launch browser with more realistic settings
+            # FIX: Use --start-maximized instead of fixed window-size to ensure true full screen
             browser = await p.chromium.launch(
-                headless=False,  # Set to False to see what's happening
+                headless=False,
                 args=[
+                    '--start-maximized',  # This forces the browser to open maximized
                     '--disable-blink-features=AutomationControlled',
                     '--disable-dev-shm-usage',
                     '--no-sandbox'
                 ]
             )
 
+            # FIX: Set viewport to None so it adapts to the maximized window
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080},
+                viewport=None,
                 locale='en-US',
                 timezone_id='America/New_York'
             )
@@ -208,26 +210,24 @@ class NHentaiTorrentDownloader:
             """)
 
             try:
-                print("\n🔍 Fetching favourites...")
+                print("\nFetching favourites...")
                 total_pages = await self.get_favourites_pages(page)
-                print(f"✓ Found {total_pages} page(s) of favourites")
+                print(f"Found {total_pages} page(s) of favourites")
 
                 if start_page > total_pages:
-                    print(f"❌ Start page {start_page} is greater than total pages {total_pages}")
+                    print(f"Start page {start_page} is greater than total pages {total_pages}")
                     return
 
                 all_gallery_ids = []
 
-                # --- START UPDATE LOGIC ---
                 if only_single_page:
-                    print(f"🎯 Mode: Only downloading page {start_page}")
+                    print(f"Mode: Only downloading page {start_page}")
                     end_page = start_page
                 else:
-                    # Collect gallery IDs normally
                     end_page = min(total_pages, start_page + 50) if max_galleries else total_pages
 
                 for page_num in range(start_page, end_page + 1):
-                    print(f"\n📄 Scraping page {page_num}...")
+                    print(f"\nScraping page {page_num}...")
                     ids = await self.get_gallery_ids_from_page(page, page_num)
                     all_gallery_ids.extend(ids)
                     print(f"  Found {len(ids)} galleries")
@@ -237,17 +237,15 @@ class NHentaiTorrentDownloader:
                         debug_file = self.output_dir / f"debug_page{page_num}.html"
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(content)
-                        print(f"  ⚠️  Saved debug HTML to {debug_file}")
+                        print(f"  Saved debug HTML to {debug_file}")
 
-                    # Optimization: Break scraping loop if we already have enough items
                     if max_galleries and len(all_gallery_ids) >= max_galleries:
                         break
-                # --- END UPDATE LOGIC ---
 
-                print(f"\n📊 Total galleries found: {len(all_gallery_ids)}")
+                print(f"\nTotal galleries found: {len(all_gallery_ids)}")
 
                 if len(all_gallery_ids) == 0:
-                    print("❌ No galleries found. Please check:")
+                    print("No galleries found. Please check:")
                     print("   1. Cookies are valid and up-to-date")
                     print("   2. You have favourites in your account")
                     print("   3. Check debug HTML file for errors")
@@ -256,10 +254,10 @@ class NHentaiTorrentDownloader:
                 # Limit if specified
                 if max_galleries:
                     all_gallery_ids = all_gallery_ids[:max_galleries]
-                    print(f"⚠️  Limiting to first {max_galleries} galleries")
+                    print(f"Limiting to first {max_galleries} galleries")
 
                 # Download torrents
-                print(f"\n⬇️  Downloading torrents to: {self.output_dir}/")
+                print(f"\nDownloading torrents to: {self.output_dir}/")
                 success_count = 0
 
                 for i, gallery_id in enumerate(all_gallery_ids, 1):
@@ -271,12 +269,12 @@ class NHentaiTorrentDownloader:
                     await asyncio.sleep(2)
 
                 print(f"\n{'=' * 50}")
-                print(f"✅ Download complete!")
-                print(f"📥 Successfully downloaded: {success_count}/{len(all_gallery_ids)} torrents")
-                print(f"📂 Files saved to: {self.output_dir.absolute()}")
+                print(f"Download complete!")
+                print(f"Successfully downloaded: {success_count}/{len(all_gallery_ids)} torrents")
+                print(f"Files saved to: {self.output_dir.absolute()}")
 
             except Exception as e:
-                print(f"\n❌ Error: {e}")
+                print(f"\nError: {e}")
                 import traceback
                 traceback.print_exc()
             finally:
@@ -307,7 +305,6 @@ async def main():
         default=1,
         help='Start from page number (default: 1)'
     )
-    # New argument added here
     parser.add_argument(
         '--only-page',
         action='store_true',
@@ -317,8 +314,6 @@ async def main():
     args = parser.parse_args()
 
     downloader = NHentaiTorrentDownloader(args.cookies_file, args.output)
-
-    # Pass the new argument to the run function
     await downloader.run(
         max_galleries=args.max,
         start_page=args.start_page,
