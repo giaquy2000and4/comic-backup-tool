@@ -172,7 +172,7 @@ class NHentaiTorrentDownloader:
             print(f"  ✗ Failed {gallery_id}: {error_msg}")
             return False
 
-    async def run(self, max_galleries: int = None, start_page: int = 1):
+    async def run(self, max_galleries: int = None, start_page: int = 1, only_single_page: bool = False):
         """Main execution function"""
         cookies = self.parse_netscape_cookies()
         if not cookies:
@@ -212,13 +212,22 @@ class NHentaiTorrentDownloader:
                 total_pages = await self.get_favourites_pages(page)
                 print(f"✓ Found {total_pages} page(s) of favourites")
 
+                if start_page > total_pages:
+                    print(f"❌ Start page {start_page} is greater than total pages {total_pages}")
+                    return
+
                 all_gallery_ids = []
 
-                # Collect gallery IDs
-                end_page = min(total_pages, start_page + 50) if max_galleries else total_pages
+                # --- START UPDATE LOGIC ---
+                if only_single_page:
+                    print(f"🎯 Mode: Only downloading page {start_page}")
+                    end_page = start_page
+                else:
+                    # Collect gallery IDs normally
+                    end_page = min(total_pages, start_page + 50) if max_galleries else total_pages
 
                 for page_num in range(start_page, end_page + 1):
-                    print(f"\n📄 Scraping page {page_num}/{total_pages}...")
+                    print(f"\n📄 Scraping page {page_num}...")
                     ids = await self.get_gallery_ids_from_page(page, page_num)
                     all_gallery_ids.extend(ids)
                     print(f"  Found {len(ids)} galleries")
@@ -229,6 +238,11 @@ class NHentaiTorrentDownloader:
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(content)
                         print(f"  ⚠️  Saved debug HTML to {debug_file}")
+
+                    # Optimization: Break scraping loop if we already have enough items
+                    if max_galleries and len(all_gallery_ids) >= max_galleries:
+                        break
+                # --- END UPDATE LOGIC ---
 
                 print(f"\n📊 Total galleries found: {len(all_gallery_ids)}")
 
@@ -293,11 +307,23 @@ async def main():
         default=1,
         help='Start from page number (default: 1)'
     )
+    # New argument added here
+    parser.add_argument(
+        '--only-page',
+        action='store_true',
+        help='Only download content from the specific start page provided in -s'
+    )
 
     args = parser.parse_args()
 
     downloader = NHentaiTorrentDownloader(args.cookies_file, args.output)
-    await downloader.run(max_galleries=args.max, start_page=args.start_page)
+
+    # Pass the new argument to the run function
+    await downloader.run(
+        max_galleries=args.max,
+        start_page=args.start_page,
+        only_single_page=args.only_page
+    )
 
 
 if __name__ == "__main__":
