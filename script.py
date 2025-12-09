@@ -18,7 +18,6 @@ class DatabaseManager:
     def init_db(self):
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        # Bảng lưu thông tin gallery
         c.execute('''
                   CREATE TABLE IF NOT EXISTS galleries
                   (
@@ -50,7 +49,6 @@ class DatabaseManager:
         conn.close()
 
     def add_gallery_id(self, gallery_id: str):
-        """Chỉ thêm ID vào DB nếu chưa tồn tại"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         try:
@@ -60,7 +58,6 @@ class DatabaseManager:
             conn.close()
 
     def update_gallery_metadata(self, gallery_id: str, metadata: dict, downloaded: bool, torrent_path: str):
-        """Cập nhật metadata và trạng thái download"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         try:
@@ -103,7 +100,6 @@ class DatabaseManager:
         c.execute('SELECT * FROM galleries WHERE title_english IS NOT NULL')
         rows = [dict(row) for row in c.fetchall()]
 
-        # Parse tags back from JSON string
         for row in rows:
             if row['tags']:
                 try:
@@ -152,16 +148,14 @@ class NHentaiTorrentDownloader:
     async def wait_for_cloudflare(self, page):
         print("Waiting for Cloudflare check...")
         try:
-            # Chờ một element đặc trưng của nhentai xuất hiện
             await page.wait_for_selector('.container', state='visible', timeout=10000)
             return True
         except:
-            # Nếu timeout, kiểm tra nội dung
             content = await page.content()
             if "Just a moment" in content or "Verify you are human" in content:
                 print("Stuck at Cloudflare. Waiting longer...")
                 await page.wait_for_timeout(5000)
-                return True  # Hy vọng nó qua
+                return True
             return True
 
     async def get_favourites_pages(self, page) -> int:
@@ -200,11 +194,11 @@ class NHentaiTorrentDownloader:
 
         return gallery_ids
 
-    async def process_gallery(self, page, gallery_id: str) -> bool:
-        """Truy cập trang gallery, lấy metadata VÀ tải torrent"""
+    async def process_gallery(self, page, gallery_id: str, metadata_only: bool = False) -> bool:
+        """Truy cập trang gallery, lấy metadata và tải torrent (tùy chọn)"""
         download_path = self.output_dir / f"{gallery_id}.torrent"
 
-        # Kiểm tra DB xem đã tải chưa
+        # Nếu file đã tồn tại và DB báo đã tải xong, thì bỏ qua
         if self.db.is_downloaded(gallery_id) and download_path.exists():
             print(f"  [Skip] {gallery_id} already downloaded.")
             return True
@@ -221,28 +215,23 @@ class NHentaiTorrentDownloader:
                 'pages': 0
             }
 
-            # Get Titles
             title_h1 = await page.query_selector('h1.title')
             title_h2 = await page.query_selector('h2.title')
             if title_h1: metadata['title_english'] = await title_h1.inner_text()
             if title_h2: metadata['title_japanese'] = await title_h2.inner_text()
 
-            # Get Tags
             tag_elements = await page.query_selector_all('.tag-container.field-name')
             for tag_el in tag_elements:
                 text = await tag_el.inner_text()
-                # Clean text lines
                 lines = [line.strip() for line in text.split('\n') if line.strip()]
                 if not lines: continue
 
                 category = lines[0].replace(':', '').strip().lower()
-                # Tags are usually in spans with class 'name'
                 tag_names = await tag_el.query_selector_all('.name')
                 for name_el in tag_names:
                     tag_val = await name_el.inner_text()
                     metadata['tags'].append(f"{category}:{tag_val}")
 
-                # Get Page Count specifically
                 if 'pages' in category:
                     try:
                         metadata['pages'] = int(lines[1])
@@ -251,35 +240,37 @@ class NHentaiTorrentDownloader:
 
             print(f"  Metadata: {metadata['title_english'][:50]}... ({metadata['pages']} pages)")
 
-            # 2. Download Torrent
+            # 2. Download Torrent (Only if not metadata_only)
             downloaded = False
-            try:
-                async with page.expect_download(timeout=15000) as download_info:
-                    # Find download button (sometimes hidden in dropdown or specific link)
-                    download_btn = await page.query_selector('a[href*="/download"]')
-                    if not download_btn:
-                        # Fallback: force navigate
-                        await page.evaluate(f'window.location.href = "{url}download"')
-                    else:
-                        await download_btn.click()
 
-                    download = await download_info.value
-                    await download.save_as(download_path)
-                    downloaded = True
-                    print(f"  Downloaded: {gallery_id}.torrent")
-            except Exception as e:
-                print(f"  Download failed for {gallery_id}: {str(e)[:50]}")
+            if not metadata_only:
+                try:
+                    async with page.expect_download(timeout=15000) as download_info:
+                        download_btn = await page.query_selector('a[href*="/download"]')
+                        if not download_btn:
+                            await page.evaluate(f'window.location.href = "{url}download"')
+                        else:
+                            await download_btn.click()
+
+                        download = await download_info.value
+                        await download.save_as(download_path)
+                        downloaded = True
+                        print(f"  Downloaded: {gallery_id}.torrent")
+                except Exception as e:
+                    print(f"  Download failed for {gallery_id}: {str(e)[:50]}")
+            else:
+                print(f"  [Metadata Only] Skipped torrent download for {gallery_id}")
 
             # 3. Update DB
             self.db.update_gallery_metadata(gallery_id, metadata, downloaded, str(download_path))
-            return downloaded
+            return True
 
         except Exception as e:
             print(f"  Error processing {gallery_id}: {e}")
             return False
 
     async def run(self, max_galleries: int = None, start_page: int = 1, only_single_page: bool = False,
-                  skip_scrape: bool = False):
+                  skip_scrape: bool = False, metadata_only: bool = False):
         cookies = self.parse_netscape_cookies()
         if not cookies: return
 
@@ -292,7 +283,7 @@ class NHentaiTorrentDownloader:
 
             all_ids = []
 
-            # Giai đoạn 1: Thu thập IDs (Scraping list)
+            # Giai đoạn 1: Thu thập IDs
             if not skip_scrape:
                 print("\n=== Phase 1: Scraping Gallery IDs ===")
                 try:
@@ -307,46 +298,35 @@ class NHentaiTorrentDownloader:
                     for i in range(start_page, end_page + 1):
                         print(f"Scraping list page {i}/{end_page}...")
                         ids = await self.get_gallery_ids_from_page(page, i)
-
-                        # Lưu ngay vào DB để tránh mất mát
                         for gid in ids:
                             self.db.add_gallery_id(gid)
-
                         all_ids.extend(ids)
 
-                        # Logic giới hạn số lượng (nếu cần dừng sớm việc lấy list)
                         if max_galleries and len(all_ids) >= max_galleries:
                             all_ids = all_ids[:max_galleries]
                             break
 
-                        await asyncio.sleep(1)  # Nghỉ nhẹ
-
+                        await asyncio.sleep(1)
                 except Exception as e:
                     print(f"Error scraping lists: {e}")
             else:
                 print("\n=== Skipping Phase 1 (List Scraping) ===")
-                # Nếu skip scrape, ta có thể load IDs từ DB chưa hoàn thành (TODO: logic mở rộng)
-                # Hiện tại đơn giản là lấy IDs từ tham số hoặc scrape lại nếu cần.
-                pass
 
             print(f"\nCollected {len(all_ids)} IDs in this session.")
 
-            # Giai đoạn 2: Xử lý từng Gallery (Metadata + Download)
-            print("\n=== Phase 2: Processing Galleries (Metadata & Download) ===")
-
-            # Nếu đã có IDs từ phase 1, dùng nó. Nếu không (do skip), có thể query DB các item chưa download
-            # Ở đây ta ưu tiên list vừa scrape được.
+            # Giai đoạn 2: Xử lý từng Gallery
+            mode_str = "Metadata Only" if metadata_only else "Metadata & Download"
+            print(f"\n=== Phase 2: Processing Galleries ({mode_str}) ===")
 
             count = 0
             for gid in all_ids:
                 if max_galleries and count >= max_galleries: break
 
                 print(f"[{count + 1}/{len(all_ids)}] Processing {gid}...")
-                success = await self.process_gallery(page, gid)
-                if success:
-                    count += 1
+                await self.process_gallery(page, gid, metadata_only=metadata_only)
+                count += 1
 
-                await asyncio.sleep(2)  # Rate limit protection
+                await asyncio.sleep(1.5)
 
             # Giai đoạn 3: Export
             print("\n=== Phase 3: Exporting Data ===")
@@ -362,7 +342,8 @@ async def main():
     parser.add_argument('-m', '--max', type=int, help='Max items to process')
     parser.add_argument('-s', '--start-page', type=int, default=1, help='Start page')
     parser.add_argument('--only-page', action='store_true', help='Only process start page')
-    parser.add_argument('--skip-list', action='store_true', help='Skip scraping list pages, use DB check (advanced)')
+    parser.add_argument('--skip-list', action='store_true', help='Skip scraping list pages')
+    parser.add_argument('--metadata-only', action='store_true', help='Only scrape metadata, do not download torrents')
 
     args = parser.parse_args()
 
@@ -371,7 +352,8 @@ async def main():
         max_galleries=args.max,
         start_page=args.start_page,
         only_single_page=args.only_page,
-        skip_scrape=args.skip_list
+        skip_scrape=args.skip_list,
+        metadata_only=args.metadata_only
     )
 
 
