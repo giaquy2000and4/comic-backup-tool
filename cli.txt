@@ -1,13 +1,29 @@
 python3 script.py [cookies_file] [tùy_chọn]
 
-python3 script.py cookies.txt -s 1 --only-page (Tải toàn bộ trang 1 (chỉ duy nhất trang 1))
 
-python3 script.py cookies.txt -s 1 --only-page -m 5 (Tải trang 1 nhưng chỉ lấy 5 truyện)
+#Quét toàn bộ favorites, chỉ lưu Title/Tags/Pages vào DB và xuất JSON. Không tải torrent.
+python3 script.py cookies.txt --metadata-only
 
-python3 script.py cookies.txt (Tải tất cả favorites và lưu vào thư mục ./torrents.)
 
-python3 script.py cookies.txt -o "Downloads/Manga" (Lưu file vào thư mục Downloads/Manga.)
+#Tải toàn bộ trang 1 (chỉ duy nhất trang 1)
+python3 script.py cookies.txt -s 1 --only-page
 
-python3 script.py cookies.txt -m 5 (Tải 5 file mới nhất)
 
-python3 script.py cookies.txt -o "D:/Myfolder" -s 2 -m 20 (Lưu vào ổ D, bắt đầu từ trang 2 và chỉ tải 20 file.)
+#Tải trang 1 nhưng chỉ lấy 5 truyện
+python3 script.py cookies.txt -s 1 --only-page -m 5
+
+
+#Tải tất cả favorites và lưu vào thư mục ./torrents.
+python3 script.py cookies.txt
+
+
+#Lưu file vào thư mục Downloads/Manga.
+python3 script.py cookies.txt -o "Downloads/Manga"
+
+
+#Tải 5 file mới nhất
+python3 script.py cookies.txt -m 5
+
+
+#Lưu vào ổ D, bắt đầu từ trang 2 và chỉ tải 20 file.
+python3 script.py cookies.txt -o "D:/Myfolder" -s 2 -m 20
