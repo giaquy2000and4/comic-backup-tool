@@ -1,3 +1,6 @@
 nhentai.net_cookies.txt
 torrents/
 *.db
+*.sqlite
+*.db3
+*.sql
