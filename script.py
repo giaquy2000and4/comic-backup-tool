@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 import sqlite3
-import csv
+import random  # <--- Mới thêm: Để tạo thời gian ngẫu nhiên
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -149,6 +149,8 @@ class NHentaiTorrentDownloader:
         print("Waiting for Cloudflare check...")
         try:
             await page.wait_for_selector('.container', state='visible', timeout=10000)
+            # Thêm một chút random wait sau khi qua CF cho an toàn
+            await asyncio.sleep(random.uniform(1.0, 2.5))
             return True
         except:
             content = await page.content()
@@ -205,9 +207,12 @@ class NHentaiTorrentDownloader:
 
         url = f"{self.base_url}/g/{gallery_id}/"
         try:
+            # Random wait nhẹ trước khi load trang
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
-            # 1. Scrape Metadata
+            # Scrape Metadata
             metadata = {
                 'title_english': '',
                 'title_japanese': '',
@@ -240,7 +245,7 @@ class NHentaiTorrentDownloader:
 
             print(f"  Metadata: {metadata['title_english'][:50]}... ({metadata['pages']} pages)")
 
-            # 2. Download Torrent (Only if not metadata_only)
+            # Download Torrent (Only if not metadata_only)
             downloaded = False
 
             if not metadata_only:
@@ -261,7 +266,7 @@ class NHentaiTorrentDownloader:
             else:
                 print(f"  [Metadata Only] Skipped torrent download for {gallery_id}")
 
-            # 3. Update DB
+            # Update DB
             self.db.update_gallery_metadata(gallery_id, metadata, downloaded, str(download_path))
             return True
 
@@ -306,7 +311,11 @@ class NHentaiTorrentDownloader:
                             all_ids = all_ids[:max_galleries]
                             break
 
-                        await asyncio.sleep(1)
+                        # ANTI-BAN: Random delay giữa các trang list
+                        delay = random.uniform(2.5, 5.0)
+                        print(f"  Waiting {delay:.1f}s before next page...")
+                        await asyncio.sleep(delay)
+
                 except Exception as e:
                     print(f"Error scraping lists: {e}")
             else:
@@ -319,14 +328,29 @@ class NHentaiTorrentDownloader:
             print(f"\n=== Phase 2: Processing Galleries ({mode_str}) ===")
 
             count = 0
+            processed_count = 0
+
             for gid in all_ids:
                 if max_galleries and count >= max_galleries: break
 
                 print(f"[{count + 1}/{len(all_ids)}] Processing {gid}...")
-                await self.process_gallery(page, gid, metadata_only=metadata_only)
-                count += 1
+                success = await self.process_gallery(page, gid, metadata_only=metadata_only)
 
-                await asyncio.sleep(1.5)
+                count += 1
+                if success:
+                    processed_count += 1
+
+                # ANTI-BAN: Cơ chế nghỉ giải lao (Cooldown)
+                # Cứ 20 truyện thì nghỉ dài 1 lần
+                if processed_count % 20 == 0 and processed_count > 0:
+                    long_break = random.uniform(20.0, 40.0)
+                    print(f"\n  [ANTI-BAN] Taking a long break for {long_break:.1f}s...\n")
+                    await asyncio.sleep(long_break)
+                else:
+                    # Delay ngẫu nhiên thông thường giữa các truyện
+                    short_delay = random.uniform(3.0, 6.0)
+                    # print(f"  Waiting {short_delay:.1f}s...")
+                    await asyncio.sleep(short_delay)
 
             # Giai đoạn 3: Export
             print("\n=== Phase 3: Exporting Data ===")
