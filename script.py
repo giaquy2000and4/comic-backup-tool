@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 import sqlite3
-import random  # <--- Mới thêm: Để tạo thời gian ngẫu nhiên
+import random
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -149,7 +149,6 @@ class NHentaiTorrentDownloader:
         print("Waiting for Cloudflare check...")
         try:
             await page.wait_for_selector('.container', state='visible', timeout=10000)
-            # Thêm một chút random wait sau khi qua CF cho an toàn
             await asyncio.sleep(random.uniform(1.0, 2.5))
             return True
         except:
@@ -200,19 +199,16 @@ class NHentaiTorrentDownloader:
         """Truy cập trang gallery, lấy metadata và tải torrent (tùy chọn)"""
         download_path = self.output_dir / f"{gallery_id}.torrent"
 
-        # Nếu file đã tồn tại và DB báo đã tải xong, thì bỏ qua
         if self.db.is_downloaded(gallery_id) and download_path.exists():
             print(f"  [Skip] {gallery_id} already downloaded.")
             return True
 
         url = f"{self.base_url}/g/{gallery_id}/"
         try:
-            # Random wait nhẹ trước khi load trang
             await asyncio.sleep(random.uniform(0.5, 1.5))
-
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
-            # Scrape Metadata
+            # --- Scrape Metadata ---
             metadata = {
                 'title_english': '',
                 'title_japanese': '',
@@ -245,24 +241,40 @@ class NHentaiTorrentDownloader:
 
             print(f"  Metadata: {metadata['title_english'][:50]}... ({metadata['pages']} pages)")
 
-            # Download Torrent (Only if not metadata_only)
+            # --- Download Torrent (Logic đã sửa) ---
             downloaded = False
 
             if not metadata_only:
                 try:
-                    async with page.expect_download(timeout=15000) as download_info:
+                    # Tăng timeout lên 30s để chờ sự kiện download bắt đầu
+                    async with page.expect_download(timeout=30000) as download_info:
+
                         download_btn = await page.query_selector('a[href*="/download"]')
-                        if not download_btn:
-                            await page.evaluate(f'window.location.href = "{url}download"')
+
+                        if download_btn:
+                            try:
+                                # Thử click cưỡng bức (force=True) với timeout ngắn (5s)
+                                # force=True sẽ click kể cả khi nút bị che bởi quảng cáo
+                                await download_btn.click(timeout=5000, force=True)
+                            except Exception:
+                                # Nếu click thất bại, dùng JS để chuyển hướng trực tiếp
+                                print(f"  [Fallback] Click failed/blocked, forcing URL navigation for {gallery_id}...")
+                                await page.evaluate(f'window.location.href = "{url}download"')
                         else:
-                            await download_btn.click()
+                            # Nếu không tìm thấy nút, thử đoán link trực tiếp
+                            print(f"  [Fallback] Button not found, trying direct link for {gallery_id}...")
+                            await page.evaluate(f'window.location.href = "{url}download"')
 
                         download = await download_info.value
                         await download.save_as(download_path)
                         downloaded = True
                         print(f"  Downloaded: {gallery_id}.torrent")
+
                 except Exception as e:
-                    print(f"  Download failed for {gallery_id}: {str(e)[:50]}")
+                    if "Timeout" in str(e):
+                        print(f"  Download timed out for {gallery_id} (No torrent or slow network)")
+                    else:
+                        print(f"  Download failed for {gallery_id}: {str(e)[:100]}")
             else:
                 print(f"  [Metadata Only] Skipped torrent download for {gallery_id}")
 
@@ -341,15 +353,12 @@ class NHentaiTorrentDownloader:
                     processed_count += 1
 
                 # ANTI-BAN: Cơ chế nghỉ giải lao (Cooldown)
-                # Cứ 20 truyện thì nghỉ dài 1 lần
                 if processed_count % 20 == 0 and processed_count > 0:
                     long_break = random.uniform(20.0, 40.0)
                     print(f"\n  [ANTI-BAN] Taking a long break for {long_break:.1f}s...\n")
                     await asyncio.sleep(long_break)
                 else:
-                    # Delay ngẫu nhiên thông thường giữa các truyện
                     short_delay = random.uniform(3.0, 6.0)
-                    # print(f"  Waiting {short_delay:.1f}s...")
                     await asyncio.sleep(short_delay)
 
             # Giai đoạn 3: Export
@@ -383,3 +392,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
