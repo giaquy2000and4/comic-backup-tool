@@ -1,12 +1,12 @@
-python script-torrent-torrent.py [cookies_file] [tùy_chọn]
+python script-torrent.py [cookies_file] [tùy_chọn]
 
 
 #Quét toàn bộ favorites, chỉ lưu Title/Tags/Pages vào DB và xuất JSON. Không tải torrent.
-python script-torrent-torrent.py cookies.txt --metadata-only
+python script-torrent.py cookies.txt --metadata-only
 
 
 #Tải toàn bộ trang 1 (chỉ duy nhất trang 1)
-python script-torrent-torrent.py cookies.txt -s 1 --only-page
+python script-torrent.py cookies.txt -s 1 --only-page
 
 
 #Tải trang 1 nhưng chỉ lấy 5 truyện
