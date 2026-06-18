@@ -4,3 +4,7 @@ torrents/
 *.sqlite
 *.db3
 *.sql
+venv/
+__pycache__/
+.env
+*.pyc
